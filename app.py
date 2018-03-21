@@ -40,3 +40,7 @@ def questions(_id=None):
 @app.route('/cms/v1/tags', methods=['GET'])
 def tags():
     return jsonify(get_tags())
+
+
+if __name__ == '__main__':
+    app.run()
