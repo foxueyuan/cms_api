@@ -34,7 +34,8 @@ def questions(_id=None):
     elif request.method == 'GET':
         tag = request.args.get('tag', None)
         reviewed = request.args.get('reviewed', None)
-        return jsonify(get_all_questions(tag=tag, reviewed=reviewed))
+        scroll_id = request.args.get('scroll_id', None)
+        return jsonify(get_records_by_page(tag=tag, reviewed=reviewed, scroll_id=scroll_id))
 
 
 @app.route('/cms/v1/tags', methods=['GET'])
@@ -43,4 +44,4 @@ def tags():
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0')
