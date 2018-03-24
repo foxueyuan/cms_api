@@ -4,8 +4,10 @@ from aioelasticsearch.helpers import Scan
 import re
 
 from elasticsearch import Elasticsearch as ES
+from baidu import *
 
-es = ES(hosts=["106.14.107.172"])
+IP = "106.14.107.172"
+es = ES(hosts=[IP])
 my_index = "lawquestion"
 my_doc_type = "lawquestion"
 
@@ -113,7 +115,7 @@ def get_fresh_tag(source):
 
 
 async def get_tag_set():
-    async with Elasticsearch(hosts="106.14.107.172") as es:
+    async with Elasticsearch(hosts=IP) as es:
         my_set = set()
         async with Scan(
                 es,
@@ -136,6 +138,89 @@ def get_tags():
     return list(my_set)
 
 
+async def update_domains(tag=None):
+    async with Elasticsearch(hosts=IP) as es:
+        my_query = {}
+        if tag:
+            my_query = {"query": {
+                "bool": {
+                    "must": [
+                        {"match": {"tag": tag}}
+                    ]
+                }
+            }}
+        async with Scan(
+                es,
+                index='lawquestion',
+                doc_type='lawquestion',
+                query=my_query,
+                scroll=u'30m'
+        ) as scan:
+            async for doc in scan:
+                source = doc['_source']
+                id = doc['_id']
+                title = source['title'].replace(u'\n', '').replace(u'\xa0', ' ').replace(u'\u2002', ' ')
+                question = source['question'].replace(u'\n', '').replace(u'\xa0', ' ').replace(u'\u2002', ' ')
+                answers = source['answers'].replace(u'\n', '').replace(u'\xa0', ' ').replace(u'\u2002', ' ')
+                try:
+                    domains = get_tags_from_baidu(title, question, answers)
+                except:
+                    pass
+                changes = {
+                    "doc": {
+                        "domains": domains
+                    }
+                }
+                update_question(id, changes)
+
+
+def get_result(query=None):
+    if query:
+        my_body = {
+          "query": {
+            "multi_match": {
+              "query": query,
+              "fields": [
+                "domains",
+                "tag",
+                "title",
+                "question",
+                "answers",
+                "tag.keyword",
+                "updated_tag",
+                "final_answer"
+              ],
+              "type": "most_fields"
+            }
+          }
+        }
+        result = es.search(
+            body=my_body,
+            doc_type=my_doc_type,
+            index=my_index
+        )
+        hits = result['hits']['hits']
+        response = []
+        base_score = 0
+        for item in hits:
+            score = item['_score']
+            if base_score == 0:
+                base_score = score
+            data = {}
+            confidence = _calculate_score(base_score=base_score,original_score=score)
+            data['content'] = item['_source']['answers'].replace(u'\xa0', ' ')
+            data['confidence'] = confidence
+            response.append(data)
+        return response
+    return []
+
+
+def _calculate_score(base_score, original_score):
+    return round(original_score/(base_score*1.1), 4)
+
+
+
+
 if __name__ == '__main__':
     # changes = {
     #     "doc" : {
@@ -156,4 +241,13 @@ if __name__ == '__main__':
     # mm = get_records_by_page(tag="刑事辩护",scroll_id=sid['scroll_id'])
     # for item in mm['questions']:
     #     print(item)
-    print(get_tags())
+    # import io
+    # import sys
+    # sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf8')
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(update_domains())
+    xxs = get_result("限制出境问题")
+    for xx in xxs:
+        print(xx['confidence'])
+
+
