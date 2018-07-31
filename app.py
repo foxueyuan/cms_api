@@ -1,9 +1,9 @@
 from flask import Flask, request, abort,jsonify
-from dal import *
 from qa_es import *
-
+from datetime import datetime
 app = Flask(__name__)
-law_es = LoadElasticSearch()
+law_es = LawElasticSearch()
+question_es = QuestionElasticSearch()
 
 
 @app.route('/cms')
@@ -46,7 +46,7 @@ def laws():
         return jsonify(law_es.get_laws_by_page(inputs=input_string, scroll_id=scroll_id))
 
 
-@app.route('/cms/v1/laws/<_id>', methods=['GET','POST'])
+@app.route('/cms/v1/laws/<_id>', methods=['GET', 'POST', 'DELETE'])
 def laws_update(_id=None):
     if request.method == 'POST':
         if not request.json or _id is None:
@@ -61,7 +61,9 @@ def laws_update(_id=None):
             'errmsg': errmsg
         }
         json_data = request.get_json()
-        changes = {"doc": {}}
+        changes = {"doc": {
+            "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        }}
         if json_data.get("question"):
             changes['doc']['question'] = json_data['question']
         if json_data.get("answer"):
@@ -79,8 +81,22 @@ def laws_update(_id=None):
         es_response = {
             'errcode': errcode,
             'errmsg': errmsg,
-            'data':law_es.query_data(_id)
+            'data': law_es.query_data(_id)
         }
+        return jsonify(es_response)
+    elif request.method == 'DELETE':
+        errcode = 0
+        errmsg = "ok"
+        es_response = {
+            'errcode': errcode,
+            'errmsg': errmsg
+        }
+        success = law_es.delete_question(_id)
+        if not success:
+            return jsonify({
+                'errcode': -1,
+                'errmsg': 'fail to remove data'
+            })
         return jsonify(es_response)
 
 
@@ -101,7 +117,7 @@ def questions():
         }
         if json_data.get("questions"):
             question_items = json_data['questions']
-            add_questions(question_items)
+            question_es.add_data_bulk(question_items)
             return jsonify(es_response)
         else:
             es_response['errcode'] = -1
@@ -109,11 +125,14 @@ def questions():
             return jsonify(es_response)
     elif request.method == 'GET':
         topic = request.args.get('topic', None)
+        input_string = []
+        if topic:
+            input_string.append({"match_phrase": {"topic": topic}})
         scroll_id = request.args.get('scroll_id', None)
-        return jsonify(get_records_by_page(topic=topic, scroll_id=scroll_id))
+        return jsonify(question_es.get_questions_by_page(inputs=input_string, scroll_id=scroll_id))
 
 
-@app.route('/cms/v1/questions/<_id>', methods=['GET', 'POST'])
+@app.route('/cms/v1/questions/<_id>', methods=['GET', 'POST', 'DELETE'])
 def questions_update(_id=None):
     if request.method == 'POST':
         if not request.json or _id is None:
@@ -128,7 +147,9 @@ def questions_update(_id=None):
             'errmsg': errmsg
         }
         json_data = request.get_json()
-        changes = {"doc": {}}
+        changes = {"doc": {
+            "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        }}
         if json_data.get("topic"):
             changes['doc']['topic'] = json_data['topic']
         if json_data.get("title"):
@@ -137,7 +158,7 @@ def questions_update(_id=None):
             changes['doc']['question'] = json_data['question']
         if json_data.get("answer"):
             changes['doc']['answer'] = json_data['answer']
-        update_question(_id, changes)
+        question_es.update_question(_id, changes)
         return jsonify(es_response)
     elif request.method == 'GET':
         if _id is None:
@@ -150,14 +171,29 @@ def questions_update(_id=None):
         es_response = {
             'errcode': errcode,
             'errmsg': errmsg,
-            'data': get_record_by_id(_id)
+            'data': question_es.query_data(_id)
         }
+        return jsonify(es_response)
+    elif request.method == 'DELETE':
+        errcode = 0
+        errmsg = "ok"
+        es_response = {
+            'errcode': errcode,
+            'errmsg': errmsg
+        }
+        success = question_es.delete_question(_id)
+        if not success:
+            return jsonify({
+                'errcode': -1,
+                'errmsg': 'fail to remove data'
+            })
         return jsonify(es_response)
 
 
 @app.route('/cms/v1/topics', methods=['GET'])
 def tags():
-    return jsonify(get_tags())
+    topics = ["婚姻家事", "员工纠纷", "交通事故", "企业人事", "民间借贷", "公司财税", "房产纠纷", "知识产权", "刑事犯罪", "消费维权"]
+    return jsonify(topics)
 
 
 # @app.route('/es/query', methods=['POST'])
