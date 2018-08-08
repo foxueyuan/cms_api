@@ -168,22 +168,27 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
                 my_query = query_generation(inputs)
             else:
                 my_query = {"query": {"match_all": {}}}
-            init_es = self.es_client.search(
+            return_result = self.es_client.search(
                 doc_type=self.doc_type, index=self.index,
                 body=my_query,
                 scroll=u'10m',
-                size=50
+                size=20
             )
-            scroll_id = init_es['_scroll_id']
-        return_result = self.es_client.scroll(scroll_id=scroll_id,
-                                  body={"scroll": u'10m'},
-                                  )
+            _scroll_id = return_result['_scroll_id']
+        if scroll_id:
+            return_result = self.es_client.scroll(scroll_id=scroll_id,
+                                      body={"scroll": u'10m'})
+            _scroll_id = scroll_id
+            if not return_result['hits']['hits']:
+                self.es_client.clear_scroll(scroll_id=scroll_id)
+                _scroll_id = ""
+
         total = return_result['hits']['total']
         questions = return_result['hits']['hits']
         response = {}
         question_list = []
         response['total'] = total
-        response['scroll_id'] = scroll_id
+        response['scroll_id'] = _scroll_id
         response['questions'] = question_list
         for question in questions:
             source = question['_source']
@@ -244,10 +249,6 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
                     },
                     'answer': {
                         'type': 'string'
-                    },
-                    'updated': {
-                        'type': 'date',
-                        'format': 'yyyy-MM-dd HH:mm:ss'
                     }
                 }
             }
@@ -325,22 +326,27 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
                 my_query = query_generation(inputs)
             else:
                 my_query = {"query": {"match_all": {}}}
-            init_es = self.es_client.search(
+            return_result = self.es_client.search(
                 doc_type=self.doc_type, index=self.index,
                 body=my_query,
-                scroll=u'10m',
-                size=50
+                scroll=u'5m',
+                size=20
             )
-            scroll_id = init_es['_scroll_id']
-        return_result = self.es_client.scroll(scroll_id=scroll_id,
-                                  body={"scroll": u'10m'},
-                                  )
+            _scroll_id = return_result['_scroll_id']
+        if scroll_id:
+            return_result = self.es_client.scroll(scroll_id=scroll_id,
+                                      body={"scroll": u'5m'})
+            _scroll_id = scroll_id
+            if not return_result['hits']['hits']:
+                self.es_client.clear_scroll(scroll_id=scroll_id)
+                _scroll_id = ""
+
         total = return_result['hits']['total']
         questions = return_result['hits']['hits']
         response = {}
         question_list = []
         response['total'] = total
-        response['scroll_id'] = scroll_id
+        response['scroll_id'] = _scroll_id
         response['questions'] = question_list
         for question in questions:
             source = question['_source']
