@@ -125,9 +125,18 @@ def questions():
             return jsonify(es_response)
     elif request.method == 'GET':
         topic = request.args.get('topic', None)
+        title = request.args.get('title', None)
+        question = request.args.get('question', None)
+        answer = request.args.get('answer', None)
         input_string = []
         if topic:
             input_string.append({"match_phrase": {"topic": topic}})
+        if title:
+            input_string.append({"match_phrase": {"title": title}})
+        if question:
+            input_string.append({"match_phrase": {"question": question}})
+        if answer:
+            input_string.append({"match_phrase": {"answer": answer}})
         scroll_id = request.args.get('scroll_id', None)
         return jsonify(question_es.get_questions_by_page(inputs=input_string, scroll_id=scroll_id))
 
