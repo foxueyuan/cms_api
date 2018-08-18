@@ -118,6 +118,12 @@ def questions():
         }
         if json_data.get("questions"):
             question_items = json_data['questions']
+            topics_items = [item['topic'] for item in question_items]
+            exist = topic_es.exist_topic(list(set(topics_items)))
+            if not exist:
+                es_response['errcode'] = -1
+                es_response['errmsg'] = "1.miss 'topic' in request body 2.topic is not exist,please add!"
+                return jsonify(es_response)
             question_es.add_data_bulk(question_items)
             return jsonify(es_response)
         else:
@@ -161,6 +167,12 @@ def questions_update(_id=None):
             "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         }}
         if json_data.get("topic"):
+            topics_items = [json_data['topic']]
+            exist = topic_es.exist_topic(topics_items)
+            if not exist:
+                es_response['errcode'] = -1
+                es_response['errmsg'] = "1.miss 'topic' in request body 2.topic is not exist,please add!"
+                return jsonify(es_response)
             changes['doc']['topic'] = json_data['topic']
         if json_data.get("title"):
             changes['doc']['title'] = json_data['title']

@@ -362,6 +362,16 @@ class TopicElasticSearch(object):  # 在ES中加载、批量插入数据
     def delete_topic(self, _id):
         return self.es_client.delete(index=self.index, doc_type=self.doc_type, id=_id)
 
+    def exist_topic(self, topics=[]):
+        if topics:
+            my_topics = {item['topic']:1 for item in self.get_topics()}
+            for topic in topics:
+                if topic not in my_topics:
+                    return False
+            return True
+        else:
+            return False
+
     def get_topics(self):
         """
         查询所有数据
