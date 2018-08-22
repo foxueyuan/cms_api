@@ -5,8 +5,105 @@ import os
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk, scan
 from datetime import datetime
+import time
+from sync_es import SyncES
 
 cur_dir = os.getcwd()
+
+sync_es = SyncES()
+
+
+def _format_data(db,remote_sync_data, row_obj):
+    data_quality = True
+    topic = row_obj.get('topic', None)
+    if db == 'qa':
+        if topic:
+            if isinstance(topic, str):
+                topic = [topic]
+        else:
+            data_quality = False
+    question = row_obj.get('question', None)
+    if question:
+        if isinstance(question, str):
+            question = [question]
+    else:
+        data_quality = False
+    title = row_obj.get('title', None)
+    if not title:
+        data_quality = False
+    answer = row_obj.get('answer', None)
+    if not answer:
+        data_quality = False
+    if data_quality:
+        sync_data = {
+            'topic': topic,
+            'question': question,
+            'title': title,
+            'answer': answer
+        }
+        remote_sync_data.append(sync_data)
+
+
+def _remote_delete_sync(intent,title):
+    return_msg = {
+        "deleted": False,
+        "msg": "failed to delete"
+    }
+    status, result = sync_es.get_by_title(intent, title)
+    if status and status == 200:
+        if result['result']:
+            delete_status = True
+            if result['result']:
+                status,reuslt = sync_es.delete(intent,result['result']['_id'])
+                if status and status != 200:
+                    delete_status = False
+            if delete_status:
+                return_msg['deleted'] = True
+                return_msg['msg'] = "success"
+                return return_msg
+            else:
+                return_msg['deleted'] = False
+                return_msg['msg'] = "failed to delete"
+                return return_msg
+        else:
+            return_msg['deleted'] = True
+            return_msg['msg'] = "no related data in train set"
+            return return_msg
+    else:
+        return return_msg
+
+
+def _remote_update_sync(intent, updates):
+    updates = updates['doc']
+    return_msg = {
+        "updated": False,
+        "msg": "failed to update"
+    }
+    status, result = sync_es.get_by_title(intent, updates['title'])
+    if status and status == 200:
+        if result['result']:
+            if 'topic' in updates:
+                topic = updates['topic']
+                if isinstance(topic, str):
+                    updates['topic'] = [topic]
+            if 'question' in updates:
+                question = updates['question']
+                if isinstance(question, str):
+                    updates['question'] = [question]
+            status, result = sync_es.update_title(intent, updates['title'], updates)
+            if status and status == 200:
+                return_msg['updated'] = True
+                return_msg['msg'] = "success"
+                return return_msg
+            else:
+                return return_msg
+        else:
+            return_msg['updated'] = "new"
+            return_msg['msg'] = "not exist in train set"
+            return return_msg
+
+    else:
+        return return_msg
 
 
 def query_generation(inputs):
@@ -68,6 +165,7 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
         self.doc_type = 'test-type'
         self.es_client = ElasticSearchClient.get_es_servers()
         self.set_mapping()
+        self.remote_db = 'qa'
 
     def set_mapping(self):
         mapping = {
@@ -87,6 +185,10 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
                     'updated': {
                         'type': 'date',
                         'format': 'yyyy-MM-dd HH:mm:ss'
+                    },
+                    'updatedAt': {
+                        'type': 'date',
+                        'format': 'epoch_second'
                     }
                 }
             }
@@ -111,9 +213,9 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
                     'answer': {
                         'type': 'string'
                     },
-                    'updated': {
+                    'updatedAt': {
                         'type': 'date',
-                        'format': 'yyyy-MM-dd HH:mm:ss'
+                        'format': 'epoch_second'
                     }
                 }
             }
@@ -140,7 +242,8 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
             "topic": return_data['_source']['topic'],
             "title": return_data['_source']['title'],
             "answer": return_data['_source']['answer'],
-            "question": return_data['_source']['question']
+            "question": return_data['_source']['question'],
+            "updated": return_data['_source']['updated']
         }
         return response
 
@@ -149,7 +252,9 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
         批量插入ES
         """
         current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        now = int(time.time())
         load_data = []
+        remote_sync_data = []
         i = 1
         bulk_num = 10000
         for row_obj in row_obj_list:
@@ -162,31 +267,96 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
                     'question': row_obj.get('question', None),
                     'answer': row_obj.get('answer', None),
                     'updated': row_obj.get('updated', current_time),
+                    'updatedAt': row_obj.get('updatedAt', now),
                 }
             }
             load_data.append(action)
+
+            _format_data(self.remote_db,remote_sync_data, row_obj)
             i += 1
             # 批量处理
             if len(load_data) == bulk_num:
                 print('插入', int(i / bulk_num), '批数据')
                 success, failed = bulk(self.es_client, load_data, index=self.index, raise_on_error=True)
+                status,result = sync_es.post(self.remote_db,remote_sync_data)
                 del load_data[0:len(load_data)]
                 print(success, failed)
+                print(status)
 
         if len(load_data) > 0:
             success, failed = bulk(self.es_client, load_data, index=self.index, raise_on_error=True)
+            status, result = sync_es.post(self.remote_db, remote_sync_data)
             del load_data[0:len(load_data)]
             print(success, failed)
+            print(status)
 
     def update_question(self, _id=None, updates={}):
-        return_result = self.es_client.update(index=self.index, doc_type=self.doc_type, id=_id, body=updates, refresh=True,
-                                  retry_on_conflict=2)
-        if return_result['result'] == 'updated':
-            return True
-        return False
+        return_msg = {
+            "updated": False,
+            "msg": "failed to update"
+        }
+        if 'title' in updates:
+            return_msg = _remote_update_sync(self.remote_db,updates)
+        else:
+            return_result = self.query_data(_id)
+            if 'title' in return_result:
+                updates['title'] = return_result['title']
+                return_msg = _remote_update_sync(self.remote_db,updates)
+            else:
+                return_msg['updated'] = False
+                return_msg['msg'] = "don't have data qualified data, miss title info for id {}".format(_id)
+                return return_msg
+
+        if return_msg and return_msg['updated'] == 'new':
+            return_result = self.query_data(_id)
+            sync_data = []
+            _format_data(self.remote_db,sync_data, return_result)
+            status,result = sync_es.post(self.remote_db,sync_data)
+            if status and status == 200:
+                return_msg['updated'] = True
+                return_msg['msg'] = "success"
+            else:
+                return_msg['updated'] = False
+                return_msg['msg'] = "fail to insert new data to train set"
+
+        if return_msg and return_msg['updated']:
+            return_result = self.es_client.update(index=self.index, doc_type=self.doc_type, id=_id, body=updates, refresh=True,
+                                      retry_on_conflict=2)
+            if return_result['result'] == 'updated':
+                return_msg['updated'] = True
+                return_msg['msg'] = "success"
+                return return_msg
+            else:
+                return_msg['updated'] = False
+                return_msg['msg'] = "failed to update"
+                return return_msg
+        else:
+            return return_msg
 
     def delete_question(self, _id):
-        return self.es_client.delete(index=self.index, doc_type=self.doc_type, id=_id)
+        return_msg = {
+            "deleted": False,
+            "msg": "failed to delete"
+        }
+        return_result = self.query_data(_id)
+        if 'title' in return_result:
+            title = return_result['title']
+            return_msg = _remote_delete_sync(self.remote_db,title)
+            print(return_msg)
+        else:
+            return_msg['deleted'] = False
+            return_msg['msg'] = "don't have data in training set, please add data firstly"
+            return return_msg
+        if return_msg and return_msg['deleted']:
+            status = self.es_client.delete(index=self.index, doc_type=self.doc_type, id=_id)
+            if status:
+                return return_msg
+            else:
+                return_msg['deleted'] = False
+                return_msg['msg'] = "failed to delete"
+                return return_msg
+        else:
+            return return_msg
 
     def get_questions_by_page(self, inputs=[], scroll_id=None):
         if not scroll_id:
@@ -218,14 +388,17 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
         response['questions'] = question_list
         for question in questions:
             source = question['_source']
-            question_item = {
-                "_id": question['_id'],
-                "topic": source['topic'],
-                "title": source['title'],
-                "question": source['question'],
-                "answer": source['answer']
-            }
-            question_list.append(question_item)
+            try:
+                question_item = {
+                    "_id": question['_id'],
+                    "topic": source['topic'],
+                    "title": source['title'],
+                    "question": source['question'],
+                    "answer": source['answer']
+                }
+                question_list.append(question_item)
+            except:
+                pass
         return response
 
     def get_records(self, inputs=[]):
@@ -251,6 +424,39 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
                     "title": source['title'],
                     "question": source['question'],
                     "answer": source['answer']
+                }
+                question_list.append(question_item)
+                total += 1
+            except:
+                pass
+        response['total'] = total
+        return response
+
+    def _get_updated_records(self):
+        """
+        查询所有数据
+        """
+        my_query = {
+                "query": {
+                    "exists" : { "field" : "updated" }
+                }
+            }
+        return_result = scan(self.es_client, query=my_query, index=self.index,
+                             doc_type=self.doc_type)
+        response = {}
+        question_list = []
+        total = 0
+        response['questions'] = question_list
+        for question in return_result:
+            source = question['_source']
+            try:
+                question_item = {
+                    "_id": question['_id'],
+                    "topic": source['topic'],
+                    "title": source['title'],
+                    "question": source['question'],
+                    "answer": source['answer'],
+                    "updated": source['updated']
                 }
                 question_list.append(question_item)
                 total += 1
@@ -363,14 +569,22 @@ class TopicElasticSearch(object):  # 在ES中加载、批量插入数据
         return self.es_client.delete(index=self.index, doc_type=self.doc_type, id=_id)
 
     def exist_topic(self, topics=[]):
+        return_msg = {
+            "exist": True,
+            "msg": "I'm here!"
+        }
         if topics:
             my_topics = {item['topic']:1 for item in self.get_topics()}
             for topic in topics:
                 if topic not in my_topics:
-                    return False
-            return True
+                    return_msg['exist'] = False
+                    return_msg['msg'] = "Topic {} is not exist in topics, please add!".format(topic)
+                    return return_msg
+            return return_msg
         else:
-            return False
+            return_msg['exist'] = False
+            return_msg['msg'] = "Miss topic in question items!"
+            return return_msg
 
     def get_topics(self):
         """
@@ -399,10 +613,14 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         self.doc_type = 'test-type'
         self.es_client = ElasticSearchClient.get_es_servers()
         self.set_mapping()
+        self.remote_db = 'kg'
 
     def set_mapping(self):
         mapping = {
             self.doc_type: {
+                    'title': {
+                        'type': 'string'
+                    },
                     'question': {
                         'type': 'string'
                     },
@@ -412,6 +630,10 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
                     'updated': {
                         'type': 'date',
                         'format': 'yyyy-MM-dd HH:mm:ss'
+                    },
+                    'updatedAt': {
+                        'type': 'date',
+                        'format': 'epoch_second'
                     }
                 }
             }
@@ -424,15 +646,18 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         mapping = {
             self.doc_type:{
                 "properties": {
+                    'title': {
+                        'type': 'string'
+                    },
                     'question': {
                         'type': 'string'
                     },
                     'answer': {
                         'type': 'string'
                     },
-                    'updated': {
+                    'updatedAt': {
                         'type': 'date',
-                        'format': 'yyyy-MM-dd HH:mm:ss'
+                        'format': 'epoch_second'
                     }
                 }
             }
@@ -456,6 +681,7 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         return_data = self.es_client.get(index=self.index, doc_type=self.doc_type, id=_id)
         response = {
             "_id": return_data['_id'],
+            "title": return_data['_source']['title'],
             "answer": return_data['_source']['answer'],
             "question": return_data['_source']['question']
         }
@@ -465,8 +691,11 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         """
         批量插入ES
         """
+        database="kg"
         load_data = []
+        remote_sync_data = []
         current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        now = int(time.time())
         i = 1
         bulk_num = 10000
         for row_obj in row_obj_list:
@@ -474,34 +703,100 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
                 '_index': self.index,
                 '_type': self.doc_type,
                 '_source': {
+                    'title': row_obj.get('title', ""),
                     'question': row_obj.get('question', None),
                     'answer': row_obj.get('answer', None),
                     'updated': row_obj.get('updated', current_time),
+                    'updatedAt': row_obj.get('updatedAt', now),
                 }
             }
             load_data.append(action)
+            _format_data(database,remote_sync_data, row_obj)
             i += 1
             # 批量处理
             if len(load_data) == bulk_num:
                 print('插入', int(i / bulk_num), '批数据')
                 success, failed = bulk(self.es_client, load_data, index=self.index, raise_on_error=True)
+                status,result = sync_es.post(database,remote_sync_data)
                 del load_data[0:len(load_data)]
                 print(success, failed)
+                print(status)
 
         if len(load_data) > 0:
             success, failed = bulk(self.es_client, load_data, index=self.index, raise_on_error=True)
+            status, result = sync_es.post(database, remote_sync_data)
             del load_data[0:len(load_data)]
             print(success, failed)
+            print(status)
 
     def delete_question(self, _id):
-        return self.es_client.delete(index=self.index, doc_type=self.doc_type, id=_id)
+        return_msg = {
+            "deleted": False,
+            "msg": "failed to delete"
+        }
+        return_result = self.query_data(_id)
+        if 'title' in return_result:
+            title = return_result['title']
+            return_msg = _remote_delete_sync(self.remote_db, title)
+            print(return_msg)
+        else:
+            return_msg['deleted'] = False
+            return_msg['msg'] = "don't have data in training set, please add data firstly"
+            return return_msg
+        if return_msg and return_msg['deleted']:
+            status = self.es_client.delete(index=self.index, doc_type=self.doc_type, id=_id)
+            if status:
+                return return_msg
+            else:
+                return_msg['deleted'] = False
+                return_msg['msg'] = "failed to delete"
+                return return_msg
+        else:
+            return return_msg
 
     def update_question(self, _id=None, updates={}):
-        return_result = self.es_client.update(index=self.index, doc_type=self.doc_type, id=_id, body=updates, refresh=True,
-                                  retry_on_conflict=2)
-        if return_result['result'] == 'updated':
-            return True
-        return False
+        return_msg = {
+            "updated": False,
+            "msg": "failed to update"
+        }
+        if 'title' in updates:
+            return_msg = _remote_update_sync(self.remote_db, updates)
+        else:
+            return_result = self.query_data(_id)
+            if 'title' in return_result:
+                updates['title'] = return_result['title']
+                return_msg = _remote_update_sync(self.remote_db, updates)
+            else:
+                return_msg['updated'] = False
+                return_msg['msg'] = "don't have data qualified data, miss title info for id {}".format(_id)
+                return return_msg
+
+        if return_msg and return_msg['updated'] == 'new':
+            return_result = self.query_data(_id)
+            sync_data = []
+            _format_data(self.remote_db, sync_data, return_result)
+            status, result = sync_es.post(self.remote_db, sync_data)
+            if status and status == 200:
+                return_msg['updated'] = True
+                return_msg['msg'] = "success"
+            else:
+                return_msg['updated'] = False
+                return_msg['msg'] = "fail to insert new data to train set"
+
+        if return_msg and return_msg['updated']:
+            return_result = self.es_client.update(index=self.index, doc_type=self.doc_type, id=_id, body=updates,
+                                                  refresh=True,
+                                                  retry_on_conflict=2)
+            if return_result['result'] == 'updated':
+                return_msg['updated'] = True
+                return_msg['msg'] = "success"
+                return return_msg
+            else:
+                return_msg['updated'] = False
+                return_msg['msg'] = "failed to update"
+                return return_msg
+        else:
+            return return_msg
 
     def get_laws_by_page(self, inputs=[], scroll_id=None):
         if not scroll_id:
@@ -533,12 +828,17 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         response['questions'] = question_list
         for question in questions:
             source = question['_source']
-            question_item = {
-                "_id": question['_id'],
-                "question": source['question'],
-                "answer": source['answer']
-            }
-            question_list.append(question_item)
+            try:
+                question_item = {
+                    "_id": question['_id'],
+                    "title": source['title'],
+                    "question": source['question'],
+                    "answer": source['answer']
+                }
+                question_list.append(question_item)
+            except:
+                pass
+
         return response
 
     def get_records(self, inputs=[]):
@@ -560,6 +860,7 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
             try:
                 question_item = {
                     "_id": question['_id'],
+                    "title": source['title'],
                     "question": source['question'],
                     "answer": source['answer'],
                     "updated": source['updated']
@@ -571,14 +872,66 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         response['total'] = total
         return response
 
+    def _get_updated_records(self, inputs=[]):
+        """
+        查询所有数据
+        """
+        my_query = {
+                "query": {
+                    "exists": {"field": "updated"}
+                }
+            }
+        return_result = scan(self.es_client, query=my_query, index=self.index,
+                             doc_type=self.doc_type)
+        response = {}
+        question_list = []
+        total = 0
+        response['questions'] = question_list
+        for question in return_result:
+            source = question['_source']
+            try:
+                question_item = {
+                    "_id": question['_id'],
+                    "question": source['question'],
+                    "answer": source['answer'],
+                    "updated": source['updated']
+                }
+                if 'title' not in source:
+                    question_item['title'] = source['question'].split("####||")[0]
+                else:
+                    question_item['title'] = source['title']
+
+                question_list.append(question_item)
+                total += 1
+            except:
+                pass
+        response['total'] = total
+        return response
+
+
+def update_exsit_records(index_type):
+    if index_type and index_type == "qa":
+        load_es = QuestionElasticSearch()
+    elif index_type and index_type == "law":
+        load_es = LawElasticSearch()
+    result = load_es._get_updated_records()
+    for question in result['questions']:
+        updated = datetime.strptime(question['updated'], '%Y-%m-%d %H:%M:%S')
+        load_es.update_question(question['_id'], {"doc": {"title":question["title"],"updatedAt": int(updated.timestamp())}})
+
 
 if __name__ == '__main__':
     # from datetime import datetime
     import csv
-    es = ElasticSearchClient.get_es_servers()
-    es.index(index='fo-topic-index', doc_type='test-type', body={'any': 'data', 'timestamp': datetime.now()})
-    load_es = TopicElasticSearch()
-    load_es.update_mapping()
+    # es = ElasticSearchClient.get_es_servers()
+    # es.index(index='fo-topic-index', doc_type='test-type', body={'any': 'data', 'timestamp': datetime.now()})
+    load_es = LawElasticSearch()
+    result = load_es._get_updated_records()
+    for question in result['questions']:
+        # updated = datetime.strptime(question['updated'], '%Y-%m-%d %H:%M:%S')
+        load_es.update_question(question['_id'],{"doc": {"title":question["title"]}})
+    # updated = datetime.strptime(result['updated'],'%Y-%m-%d %H:%M:%S')
+    # print(int(updated.timestamp()))
     # xx = load_es.get_records()
     # print(len(xx['questions']))
     # # result = load_es.get_records([

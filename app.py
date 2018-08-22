@@ -1,6 +1,7 @@
 from flask import Flask, request, abort,jsonify
 from qa_es import *
 from datetime import datetime
+import time
 app = Flask(__name__)
 law_es = LawElasticSearch()
 question_es = QuestionElasticSearch()
@@ -36,9 +37,12 @@ def laws():
             es_response['errmsg'] = "miss 'questions' in request body"
             return jsonify(es_response)
     elif request.method == 'GET':
+        title = request.args.get('title', None)
         question = request.args.get('question', None)
         answer = request.args.get('answer', None)
         input_string = []
+        if title:
+            input_string.append({"match_phrase": {"title": title}})
         if question:
             input_string.append({"match_phrase": {"question": question}})
         if answer:
@@ -63,14 +67,22 @@ def laws_update(_id=None):
         }
         json_data = request.get_json()
         changes = {"doc": {
-            "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+            "updatedAt": int(time.time())
         }}
+        if json_data.get("title"):
+            changes['doc']['title'] = json_data['title']
         if json_data.get("question"):
             changes['doc']['question'] = json_data['question']
         if json_data.get("answer"):
             changes['doc']['answer'] = json_data['answer']
-        law_es.update_question(_id, changes)
-        return jsonify(es_response)
+        updated_result = law_es.update_question(_id, changes)
+        if updated_result['updated']:
+            return jsonify(es_response)
+        else:
+            es_response['errcode'] = -1
+            es_response['errmsg'] = updated_result['msg']
+            return jsonify(es_response)
     elif request.method == 'GET':
         if _id is None:
             return jsonify({
@@ -92,13 +104,13 @@ def laws_update(_id=None):
             'errcode': errcode,
             'errmsg': errmsg
         }
-        success = law_es.delete_question(_id)
-        if not success:
-            return jsonify({
-                'errcode': -1,
-                'errmsg': 'fail to remove data'
-            })
-        return jsonify(es_response)
+        deleted_result = law_es.delete_question(_id)
+        if deleted_result['deleted']:
+            return jsonify(es_response)
+        else:
+            es_response['errcode'] = -1
+            es_response['errmsg'] = deleted_result['msg']
+            return jsonify(es_response)
 
 
 @app.route('/cms/v1/questions', methods=['GET', 'POST'])
@@ -119,10 +131,10 @@ def questions():
         if json_data.get("questions"):
             question_items = json_data['questions']
             topics_items = [item['topic'] for item in question_items]
-            exist = topic_es.exist_topic(list(set(topics_items)))
-            if not exist:
+            result_msg = topic_es.exist_topic(list(set(topics_items)))
+            if not result_msg['exist']:
                 es_response['errcode'] = -1
-                es_response['errmsg'] = "1.miss 'topic' in request body 2.topic is not exist,please add!"
+                es_response['errmsg'] = result_msg['msg']
                 return jsonify(es_response)
             question_es.add_data_bulk(question_items)
             return jsonify(es_response)
@@ -164,14 +176,15 @@ def questions_update(_id=None):
         }
         json_data = request.get_json()
         changes = {"doc": {
-            "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            "updated": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+            "updatedAt": int(time.time())
         }}
         if json_data.get("topic"):
             topics_items = [json_data['topic']]
-            exist = topic_es.exist_topic(topics_items)
-            if not exist:
+            result_msg = topic_es.exist_topic(topics_items)
+            if not result_msg['exist']:
                 es_response['errcode'] = -1
-                es_response['errmsg'] = "1.miss 'topic' in request body 2.topic is not exist,please add!"
+                es_response['errmsg'] = result_msg['msg']
                 return jsonify(es_response)
             changes['doc']['topic'] = json_data['topic']
         if json_data.get("title"):
@@ -180,8 +193,13 @@ def questions_update(_id=None):
             changes['doc']['question'] = json_data['question']
         if json_data.get("answer"):
             changes['doc']['answer'] = json_data['answer']
-        question_es.update_question(_id, changes)
-        return jsonify(es_response)
+        updated_result = question_es.update_question(_id, changes)
+        if updated_result['updated']:
+            return jsonify(es_response)
+        else:
+            es_response['errcode'] = -1
+            es_response['errmsg'] = updated_result['msg']
+            return jsonify(es_response)
     elif request.method == 'GET':
         if _id is None:
             return jsonify({
@@ -203,13 +221,13 @@ def questions_update(_id=None):
             'errcode': errcode,
             'errmsg': errmsg
         }
-        success = question_es.delete_question(_id)
-        if not success:
-            return jsonify({
-                'errcode': -1,
-                'errmsg': 'fail to remove data'
-            })
-        return jsonify(es_response)
+        deleted_result = question_es.delete_question(_id)
+        if deleted_result['deleted']:
+            return jsonify(es_response)
+        else:
+            es_response['errcode'] = -1
+            es_response['errmsg'] = deleted_result['msg']
+            return jsonify(es_response)
 
 
 # @app.route('/cms/v1/topics', methods=['GET'])
