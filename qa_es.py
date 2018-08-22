@@ -237,13 +237,13 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
         :return:
         """
         return_data = self.es_client.get(index=self.index, doc_type=self.doc_type, id=_id)
+        source = return_data['_source']
         response = {
             "_id": return_data['_id'],
-            "topic": return_data['_source']['topic'],
-            "title": return_data['_source']['title'],
-            "answer": return_data['_source']['answer'],
-            "question": return_data['_source']['question'],
-            "updated": return_data['_source']['updated']
+            "topic": source.get('topic',None),
+            "title": source.get('title',None),
+            "answer": source.get('answer',None),
+            "question": source.get('question',None)
         }
         return response
 
@@ -420,10 +420,10 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
             try:
                 question_item = {
                     "_id": question['_id'],
-                    "topic": source['topic'],
-                    "title": source['title'],
-                    "question": source['question'],
-                    "answer": source['answer']
+                    "topic": source.get('topic',None),
+                    "title": source.get('title',None),
+                    "question": source.get('question',None),
+                    "answer": source.get('answer',None),
                 }
                 question_list.append(question_item)
                 total += 1
@@ -876,10 +876,9 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
             try:
                 question_item = {
                     "_id": question['_id'],
-                    "title": source['title'],
-                    "question": source['question'],
-                    "answer": source['answer'],
-                    "updated": source['updated']
+                    "title": source.get('title',None),
+                    "question": source.get('question',None),
+                    "answer": source.get('answer',None)
                 }
                 question_list.append(question_item)
                 total += 1
@@ -908,9 +907,10 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
             try:
                 question_item = {
                     "_id": question['_id'],
-                    "question": source['question'],
-                    "answer": source['answer'],
-                    "updated": source['updated']
+                    "question": source.get('question',None),
+                    "answer": source.get('answer',None),
+                    "title":source.get('title',None),
+                    "updated": source.get('updated',None)
                 }
                 if 'title' not in source:
                     question_item['title'] = source['question'].split("####||")[0]
