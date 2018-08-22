@@ -679,11 +679,20 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         :return:
         """
         return_data = self.es_client.get(index=self.index, doc_type=self.doc_type, id=_id)
+        source = return_data['_source']
+        questions = source.get("question", None)
+        if questions:
+            if not isinstance(questions, list):
+                if "####||" in questions:
+                    source['question'] = questions.split("####||")
+                else:
+                    source['question'] = [questions]
+
         response = {
             "_id": return_data['_id'],
-            "title": return_data['_source']['title'],
-            "answer": return_data['_source']['answer'],
-            "question": return_data['_source']['question']
+            "title": source['title'],
+            "answer": source['answer'],
+            "question": source['question']
         }
         return response
 
@@ -829,6 +838,13 @@ class LawElasticSearch(object):  # 在ES中加载、批量插入数据
         for question in questions:
             source = question['_source']
             try:
+                questions = source.get("question",None)
+                if questions:
+                    if not isinstance(questions,list):
+                        if "####||" in questions:
+                            source['question'] = questions.split("####||")
+                        else:
+                            source['question'] = [questions]
                 question_item = {
                     "_id": question['_id'],
                     "title": source['title'],
