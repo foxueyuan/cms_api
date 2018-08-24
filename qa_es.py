@@ -322,7 +322,7 @@ class QuestionElasticSearch(object):  # 在ES中加载、批量插入数据
 
 class TopicElasticSearch(object):  # 在ES中加载、批量插入数据
     def __init__(self):
-        self.index = config.INDEX_NAME
+        self.index = config.TOPIC_INDEX_NAME
         self.doc_type = config.DOC_TYPE_TP
         self.es_client = ElasticSearchClient.get_es_servers()
         self.set_mapping()

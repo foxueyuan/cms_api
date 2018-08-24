@@ -9,6 +9,9 @@ ES_SERVER = "106.14.107.172"
 INDEX_NAME = "fo-index"
 DOC_TYPE_QA = "qa"
 DOC_TYPE_KG = "kg"
+
+
+TOPIC_INDEX_NAME = "fo-topic-index"
 DOC_TYPE_TP = "topic"
 
 
