@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 
-ES_SERVER = "http://elastic:Foschool123!@es-cn-0pp0qy22h0006q419.elasticsearch.aliyuncs.com:9200"
-ES_PORT = "9200"
-
-ES_SERVER = "106.14.107.172"
+ES_HOST = ['http://elastic:Foschool123!@es-cn-0pp0qy22h0006q419.elasticsearch.aliyuncs.com:9200']
+ES_HOST = ['http://106.14.107.172:9200']
 
 
 INDEX_NAME = "fo-index"

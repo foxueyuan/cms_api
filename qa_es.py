@@ -55,11 +55,7 @@ def query_generation(inputs):
 class ElasticSearchClient(object):
     @staticmethod
     def get_es_servers():
-        es_servers = [{
-            "host": config.ES_SERVER,
-            "port": config.ES_PORT
-        }]
-        es_client = Elasticsearch(hosts=es_servers)
+        es_client = Elasticsearch(hosts=config.ES_HOST)
         return es_client
 
 
