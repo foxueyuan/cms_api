@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-ES_SERVER = "es-cn-0pp0qy22h0006q419.elasticsearch.aliyuncs.com"
+ES_SERVER = "http://elastic:Foschool123!@es-cn-0pp0qy22h0006q419.elasticsearch.aliyuncs.com:9200"
 ES_PORT = "9200"
 
 ES_SERVER = "106.14.107.172"
