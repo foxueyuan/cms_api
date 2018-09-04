@@ -42,11 +42,11 @@ def laws():
         answer = request.args.get('answer', None)
         input_string = []
         if title:
-            input_string.append({"match_phrase": {"title": title}})
+            input_string.append({"match": {"title": title}})
         if question:
-            input_string.append({"match_phrase": {"question": question}})
+            input_string.append({"match": {"question": question}})
         if answer:
-            input_string.append({"match_phrase": {"answer": answer}})
+            input_string.append({"match": {"answer": answer}})
         scroll_id = request.args.get('scroll_id', None)
         return jsonify(law_es.get_laws_by_page(inputs=input_string, scroll_id=scroll_id))
 
@@ -150,11 +150,11 @@ def questions():
         if topic:
             input_string.append({"match_phrase": {"topic": topic}})
         if title:
-            input_string.append({"match_phrase": {"title": title}})
+            input_string.append({"match": {"title": title}})
         if question:
-            input_string.append({"match_phrase": {"question": question}})
+            input_string.append({"match": {"question": question}})
         if answer:
-            input_string.append({"match_phrase": {"answer": answer}})
+            input_string.append({"match": {"answer": answer}})
         scroll_id = request.args.get('scroll_id', None)
         return jsonify(question_es.get_questions_by_page(inputs=input_string, scroll_id=scroll_id))
 
